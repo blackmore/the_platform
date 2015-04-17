@@ -1,0 +1,617 @@
+<?php
+
+ini_set("session.cache_expire","480"); // minutes
+ini_set("session.gc_maxlifetime","28800"); // seconds
+
+// Das gesamte Formular wird mit PEAR::HTML_Quickform aufgebaut
+require_once "HTML/QuickForm.php";
+require_once "include/ElementGrid.php";
+require_once "include/QuickForm_freeze.php";
+require_once "include/JavaScriptGenerator.php";
+
+// MySQL wird über PEAR::MDB2 angesprochen
+require_once 'MDB2.php';
+// Authentication mit PEAR::Auth
+require_once "Auth.php";
+
+require_once "config.inc";
+
+// User-Authentication ------------------------------------------------------------------------------------------------
+$options = array(
+  'dsn' => $MYSQL_DSN,
+  'table' => "Staff",
+  'usernamecol' => "Login",
+  'passwordcol' => "Password",
+  'cryptType' => "md5",
+  'db_fields' => array( 'StaffID' , 'GroupID' , 'Active' ),
+  'db_options'  => array('portability' => MDB2_PORTABILITY_ALL - MDB2_PORTABILITY_FIX_CASE - MDB2_PORTABILITY_EMPTY_TO_NULL )
+  );
+$auth = new Auth("MDB2", $options, "loginFunction");
+$login_box = "";
+$auth->setCheckAuthCallback("checkLoginFunction");
+$auth->setSessionName("Titelbild Web-Interface");
+$auth->setExpire(3600*10);
+$auth->setIdle(3600*10);
+$auth->start();
+// --------------------------------------------------------------------------------------------------------------------
+
+// Verbinde zur Datenbank ---------------------------------------------------------------------------------------------
+$options = array(
+    'debug' => 2,
+    'result_buffering' => false,
+    'portability' => ( MDB2_PORTABILITY_ALL - MDB2_PORTABILITY_FIX_CASE - MDB2_PORTABILITY_EMPTY_TO_NULL )
+);
+$mdb2 =& MDB2::factory($MYSQL_DSN, $options);
+if (PEAR::isError($mdb2)) {
+    die($mdb2->getMessage());
+}
+$mdb2->loadModule('Extended');
+$mdb2->setFetchMode(MDB2_FETCHMODE_ASSOC);
+$mdb2->query('SET NAMES utf8');
+$mdb2->query('SET CHARACTER_SET utf8');
+$mdb2->setCharset('utf8');
+// --------------------------------------------------------------------------------------------------------------------
+
+// ### Funktionen ### -------------------------------------------------------------------------------------------------
+
+function is_a_date( $str ) {
+	if( input2date($str) === false ) return false;
+	else return true;
+}
+function is_a_time( $str ) {
+	if( input2time($str) === false ) return false;
+	else return true;
+}
+function check_timetracking( $arr ) {
+	if( $arr['TypeID'] == 0 ) return true;
+	elseif( $arr['Date']!="" && $arr['Duration']!="" && $arr['StaffID']>0 )return true;
+	elseif( $arr['Date']!="" && $arr['Wert']!="" && $arr['StaffID']>0 ) return true;
+	else return false;
+}
+
+function checkLoginFunction( $user , &$auth ) {
+	global $login_box;
+	if( $auth->getAuthData("Active") != "1" ){
+		$auth->start();
+		return false;
+	} else return true;
+
+}
+
+function checkTaskDates( $task , $deadline_timestamp , $pos , $seterror = true ) {
+	global $form;
+	// Hinweise zum Abgabedatum
+			
+	// Startdatum überschritten und nicht in Arbeit
+	$restzeit = $task['StartDate_Timestamp']-mktime();
+	if( $task['StatusID']<2 && $task['StartDate_Timestamp'] != null && $restzeit < 0 ) {
+		if( $seterror ) $form->setElementError("TaskGroup[$pos]" , "Warnung: Noch nicht in Arbeit");
+		setAmpel("gelb");
+	} 
+			
+	// Enddatum überschritten und nicht fertig
+	$restzeit = $task['EndDate_Timestamp']-mktime();
+	if( $task['StatusID']!=3 && $task['EndDate_Timestamp'] != null && $restzeit < 0 ) {
+		if( $seterror ) $form->setElementError("TaskGroup[$pos]" , "Warnung: Abgabedatum ist überschritten");
+		setAmpel("rot");
+	}
+			
+	// Enddatum liegt hinter der Deadline
+	$restzeit = $deadline_timestamp+24*3600-$task['EndDate_Timestamp'];
+	if( $deadline_timestamp != null && $task['EndDate_Timestamp'] != null && $restzeit < 0 ) {
+		if( $seterror ) $form->setElementError("TaskGroup[$pos]" , "Warnung: Enddatum ist später als Deadline");
+		setAmpel("rot");
+	}
+			
+	// Enddatum liegt vor Startdatum
+	$restzeit = $task['EndDate_Timestamp']-$task['StartDate_Timestamp'];
+	if( $task['StartDate_Timestamp'] != null && $task['EndDate_Timestamp'] != null && $restzeit < 0 ) {
+		if( $seterror ) $form->setElementError("TaskGroup[$pos]" , "Warnung: Enddatum liegt vor Startdatum");
+		setAmpel("rot");
+	}
+}
+
+function checkProductionDates( $deadline_timestamp , $seterror = true ) {
+	global $form;
+	// Hinweise zur Deadline
+	$restzeit = $deadline_timestamp-mktime();
+	if( $deadline_timestamp != null && $restzeit < 0  ) {
+		if( $restzeit > -24*3600 ) {
+			if( $seterror ) $form->setElementError('Deadline', "Warnung: Deadline ist heute");
+			setAmpel("gelb");
+		} else {
+			if( $seterror ) $form->setElementError('Deadline', "Warnung: Deadline ist überschritten");
+			setAmpel("rot");
+		}
+	} 
+}
+
+// Erstellt das Login-Formular
+function loginFunction( $username = null, $status = null , &$auth ) {	global $login_box;
+	if( $auth->getStatus() == -3 ) $fehler = "FEHLER: Falscher Login.";
+	$login_box = "<div id=\"login\"><form name=\"frmLogin\" method=\"post\" action=\"$PHP_SELF?action=login\">
+		User: <input type=\"text\" name=\"username\" value=\"$username\">
+		&nbsp; Passwort: <input type=\"password\" name=\"password\">
+		&nbsp;<button type=\"submit\" value=\"Einloggen\">Einloggen</button>
+		</form></div>";
+}
+
+// Speichert das Trackingsheet auf dem Fileserver
+function saveTrackingSheet( $ProductionID , $values ) {
+	global $customer, $category, $SMB_CONNECT, $SMB_PATH, $display_message, $SCRIPT_LOCATION, $PRODUCTIONSTATUS_LOCK;
+	if(  $values['Title']!="" ) {
+		if( $values['CustomerID'] > 0 )
+			$customer_name = "_" . make_charstring($customer[$values['CustomerID']]);
+		else
+			$customer_name = "";
+		
+		if( $values['StatusID']>=$PRODUCTIONSTATUS_LOCK )
+			$new_path = "Fertige_Projekte\\".$category[$values['CategoryID']]."\\".date('Y');
+		else
+			$new_path = "Laufende_Projekte\\".$category[$values['CategoryID']];
+		
+		$new_filename = make_charstring(strtr($values['ProductionNo'],"/","-"))."_".make_charstring($values['Title']).$customer_name.".html";
+		
+		DebugMSG( "Kopiere auf Fileserver: " . $new_filename );
+		
+		// kopiere Trackingsheet in den Produktionspfad
+		$temp = tempnam(null,"tracking.html");
+		if (copy($SCRIPT_LOCATION."tracking_print.php?ProductionID=".$ProductionID, $temp)) {
+			$rueck = exec($SMB_CONNECT." -D \"$SMB_PATH".$new_path."\" -c \"put $temp $new_filename\"" );
+			if( $rueck != "" ) {
+				// 1. Versuch hat nicht geklappt, erstelle höchste Verzeichnisebene (Jahr)
+				$rueck = exec( $SMB_CONNECT." -D \"$SMB_PATH\" -c \"mkdir ".$new_path."\"" );
+				// Verzeichnis erstellt oder bereits vorhanden:
+				if( !( $rueck != "" || strstr( $rueck ,"OBJECT_NAME_COLLISION" ) ) ) {
+					// Versuche nochmals
+					$rueck = exec($SMB_CONNECT." -D \"$SMB_PATH".$new_path."\" -c \"put $temp $new_filename\"" );
+					if( $rueck != "" ) {
+						// 2. Versuch ebenfalls fehlgeschlafen
+						$display_message = "Fehler beim Kopieren des Trackingsheets auf den Fileserver (2. Versuch):<br>".$rueck;
+					}
+				} else {
+					// Fehler beim Erstellen des Verzeichnisses
+					$display_message = "Fehler beim Erstellen des Produktionspfades auf dem Fileserver \"".$new_path."\": <br>$rueck";
+				}
+			}
+		}
+	}
+}
+
+// sendet eine SQL-Abfrage für mehrere Zeilen und kümmert sich um Fehlermeldung
+function SQLQuery( $query ) {
+	global $mdb2, $FORM_DEBUG_ON;
+	$erg = $mdb2->queryAll($query);
+	if (PEAR::isError($erg)) {
+		if( $FORM_DEBUG_ON ) {
+			$bis = strpos( $query , " " );
+			echo "\n<br><b>" . substr( $query , 0 , $bis ) . "</b>" . substr( $query , $bis ) . "\n";
+		}
+    		die($erg->getMessage());
+	} else return $erg;
+}
+// sendet eine SQL-Abfrage für eine Zeile und kümmert sich um Fehlermeldung
+function SQLLQuery( $query ) {
+	global $mdb2, $FORM_DEBUG_ON;
+	$erg = $mdb2->queryRow($query);
+	if (PEAR::isError($erg)) {
+    		if( $FORM_DEBUG_ON ) {
+			$bis = strpos( $query , " " );
+			echo "\n<br><b>" . substr( $query , 0 , $bis ) . "</b>" . substr( $query , $bis ) . "\n";
+		}
+    		die($erg->getMessage());
+	} else return $erg;
+}
+// sendet eine SQL-Abfrage und speichert assoziativ nach Primärschlüssel
+function SQLAQuery( $query ) {
+	global $mdb2, $FORM_DEBUG_ON;
+	$erg = $mdb2->extended->getAssoc($query);
+	if (PEAR::isError($erg)) {
+    		if( $FORM_DEBUG_ON ) {
+			$bis = strpos( $query , " " );
+			echo "\n<br><b>" . substr( $query , 0 , $bis ) . "</b>" . substr( $query , $bis ) . "\n";
+		}
+    		die($erg->getMessage());
+	} else return $erg;
+}
+// sendet eine SQL-Insert-Abfrage und gibt den Schlüssel zurück
+function SQLIQuery( $query ) {
+	global $mdb2, $FORM_DEBUG_ON;
+	if( $FORM_DEBUG_ON ) {
+		$bis = strpos( $query , " " );
+		$bis = strpos( $query , " " , $bis+1 );
+		echo "\n<br><b>" . substr( $query , 0 , $bis ) . "</b>" . substr( $query , $bis ) . "\n";
+	}
+	$erg = $mdb2->queryRow($query);
+	if (PEAR::isError($erg)) {
+    		die($erg->getMessage());
+	} else return $mdb2->lastInsertID();
+}
+// schreibt Debug-Informationen
+function DebugMSG( $str ) {
+	global $FORM_DEBUG_ON;
+	if( $FORM_DEBUG_ON ) echo "<span class=\"debug\">[debug: $str ] </span>\n";
+}
+
+// ändert die Ampel, falls sie nicht bereits gesetzt ist. 
+function setAmpel( $farbe , $force=false ) {
+	global $ampel;
+	if( $force ) $ampel = $farbe;
+	else if( $farbe == "gelb" && $ampel == "gruen" ) $ampel = $farbe;
+	else if( $farbe == "rot" && ( $ampel == "gruen" || $ampel == "gelb" ) ) $ampel = $farbe;
+}
+
+function make_charstring( $str ) {
+	return strtr(ereg_replace("[^A-Za-z0-9äöüÄÖÜ_ -]","",$str)," ","_");
+}
+
+// kürzt einen String und fügt ggf. "..." an
+function trimStr( $str , $len=null ) {
+	if( isset($len) && strlen($str)>$len+1 )
+		return substr( $str, 0 , $len ) . "&hellip;";
+	else if(strlen($str)==0 )
+		return "&nbsp;";
+	else 
+		return $str;
+}
+// erweitert bzw. kürzt einen String auf gegebene Länge
+function makeStrLen( $str , $len ) {
+	return substr( str_pad( $str , 10 ) , 0 , $len );
+}
+// holt Werte über GET
+function getGET( $variable , $standardWert ) {
+	if( isset( $_GET[$variable] ) )
+		$variable2 = urldecode( $_GET[$variable] );
+	else
+		$variable2 = $standardWert;
+
+	return $variable2;
+}
+// Holt Werte über GET bzw. Auth-Session
+function getAUTH( $variable , $standardWert , $use_post=false ) {
+	global $auth;
+	if( $use_post && isset($_POST[$variable]) ) {
+		$value = urldecode( $_POST[$variable] );
+		$auth->setAuthData( $variable , $value , true );
+	} else if( isset($_GET[$variable]) ) {
+		$value = urldecode( $_GET[$variable] );
+		$auth->setAuthData( $variable , $value , true );
+	} else if( $auth->getAuthData($variable) != null )
+		$value = $auth->getAuthData($variable);
+	else
+		$value = $standardWert;
+	return $value;
+}
+// Macht aus der Eingabe einen Datumswert
+// TODO: die eingabe wird bereits per Javascript korrigiert, hier muss also
+// nur standard-eingabeformat ind standard-mysql-format konvertiert werden.
+function input2date($str) {
+	$str = trim($str);
+	if( $str == "" ) return "";
+	
+	$date="";
+	
+	$teile = explode(" ", $str);
+	if( count($teile) > 2 ) return false;	
+	
+	if( strpos($teile[0], ".")>0 && strpos($teile[1], ":")>0 ) {
+		$idate = $teile[0];
+		$itime = $teile[1];
+	} else if( strpos($teile[0], ".")>0 && $teile[1] == "" ) {
+		$idate = $teile[0];
+	} else return false;
+	
+	$token="-./ ";
+	$p1 = strtok($idate,$token);
+	$p2 = strtok($token);
+	$p3 = strtok($token);
+	$p4 = strtok($token);
+	
+	if( !is_numeric($p1) || !is_numeric($p2) || ( $p3!="" && !is_numeric($p3))  ) return false;
+
+	$y=""; $m=""; $d="";
+
+	// prüfe 'd.m.y'
+	if (($p1>0 && $p1<32) && ($p2>0 && $p2<=12) && $p3!="" && ($p3>=0)) {
+		$y=$p3;
+		$m=$p2;
+		$d=$p1;
+	}
+	// prüfe 'y.m.d'
+	else if (($p1>32) && ($p2>0 && $p2<=12) && ($p3>0 && $p3>=0)) {
+		$y=$p1;
+		$m=$p2;
+		$d=$p3;
+	}
+	// prüfe 'd.m'
+	else if (($p3=="") && ($p2>0 && $p2<=12) && ($p1>0 && $p1<=31)) {
+		$y=date("Y");
+		$m=$p2;
+		$d=$p1;
+	}
+	else return false;
+
+	// addiere 1900 oder 2000
+	if ($y!="" && $y<=99) {
+		if ($y>=70) $y = $y + 1900;
+		if ($y<70) $y = $y + 2000;
+	}
+	
+	if( isset($itime) ) {
+		$time_arr = explode(":", $itime);
+		if( $time_arr[0]<24 && $time_arr[1]<60 ) {
+			$time = " $time_arr[0]:$time_arr[1]:00";
+		}
+		else return false;
+	} else $time="";
+
+	if ($y!="") {
+		if (checkdate($m, $d, $y)) {
+			$date="$y-$m-$d".$time;
+			return $date;
+		}
+	}
+	
+	return false;
+}
+
+// Macht aus der Eingabe einen Zeitwert
+function input2time($str) {
+	$str = trim($str);
+	if( $str == "" ) return "";
+	
+	$time="";
+	$h=""; $m="";
+	
+	// h.h oder h,h
+	if( count(explode(".", $str) ) == 2 || count(explode(",", $str) ) == 2 ) {
+		$p = explode(".", $str);
+		if( count($p)!=2 ) $p = explode(",", $str);	
+		if( ( $p[0]!="" && !is_numeric($p[0])) || ( $p[1]!="" && !is_numeric($p[1]))  ) return false;
+		if( strlen($p[1])==1 ) $p[1].="0";
+		// prüfe 'h.hh'
+		if (($p[0]>=0 ) && $p[1]!="" && ($p[1]>=0 && $p[1]<100)) {
+			$h=$p[0];
+			$m=round((60*$p[1])/100);
+		} else return false;
+	// p0:p1
+	} elseif( count(explode(":", $str) ) <= 2 ) {
+		$p = explode(":", $str);	
+		if( ( $p[0]!="" && !is_numeric($p[0])) || ( $p[1]!="" && !is_numeric($p[1]))  ) return false;
+		// prüfe 'h:m'
+		if (($p[0]>=0 ) && $p[1]!="" && ($p[1]>=0 && $p[1]<60)) {
+			$h=$p[0];
+			$m=$p[1];
+		// prüfe 'h'
+		} else if ($p[0]>=0 && $p[1]=="") {
+			$h=$p[0];
+			$m=0;
+		} else return false;
+	} else return false;
+	
+	$time="$h:$m";
+	return $time;
+
+}
+
+// Macht ein Array mit Daten für mySQL-Abfrage versandfertig: Eigenschaften
+function explode_keys($array) {
+	$return = '';
+	foreach ($array as $key => $val) {
+		$return .= " , ". $key;
+	}
+	return substr($return,3); // schneidet erstes Komma ab
+}
+
+// Macht ein Array mit Daten für mySQL-Abfrage versandfertig: Werte
+function explode_values($array , $empty = "null") {
+	$return = '';
+	foreach ($array as $key => $val) {
+		if( $val=='' || ( $val==0 && substr($key, -2, 2)=="ID" ) )
+			$return .= " , $empty";
+		else
+			$return .= " , '". addslashes($val) . "'";
+	}
+	return substr($return,3); // schneidet erstes Komma ab
+}
+
+function explode_array($array , $empty = "null") {
+	$return = '';
+	foreach ($array as $key => $val) {
+		if( $val=='' || ( $val==0 && substr($key, -2, 2)=="ID" ) )
+			$return .= " , $key = $empty";
+		else
+			$return .= " , $key = '". addslashes($val) . "'";
+	}
+	return substr($return,3); // schneidet erstes Komma ab
+}
+
+// Ändert die Array-Keys
+function map_prev( $arr ) {
+	$arr2 = array();
+	foreach( $arr as $key => $val ) {
+		if( !isset($arr[$key."_prev"]) ) {
+			if( !isset($val) ) $val = "";
+			$arr2 = array_merge( $arr2 , array( $key."_prev" => $val ));
+		}
+	}
+	return $arr2;
+}
+
+function reduce_keys( $arr ) {
+	$out = "";
+	
+	foreach( $arr as $abschnitt => $arr2 ) {
+		foreach( $arr2['text'] as $key => $val ) {
+			$out = "$out, $key";
+		}
+		foreach( $arr2['bool'] as $key => $val ) {
+			$out = "$out, $key";
+		}
+	}
+	return substr($out,2);
+}
+
+// Erstellt das Array für die Abfrage abhängig davon, ob das Feld geändert wurde (über Feldname_prev)
+function make_eintrag_array( $values , $arr ) {
+	$eintrag_array = array();
+	foreach( $arr as $key => $val ) {
+		if( $val=='' || ( $val==0 && substr($key, -2, 2)=="ID" ) )
+				$val = "";
+		if( isset($values[$key]) &&  $val != $values[$key."_prev"] ) { 
+			DebugMSG("Änderung in $key von ".$values[$key."_prev"]." nach $val");
+			$eintrag_array["$key"] = $val;
+		}
+	}
+	return $eintrag_array;
+}
+
+class ProductionListHeader {
+	var $order, $field, $title, $style, $output, $nextorder, $url;
+		
+	function ProductionListHeader( $field , $title , $url='?', $style='' , $order='ASC' ) {
+		$this->field = $field;
+		$this->title = $title;
+		$this->style = $style;
+		$this->order = $order;
+		$this->url = $url;
+		$this->setOrder( null , $order );
+	}
+	
+	// formatiert den Eintrag nach den aktuellen Order-Parametern
+	function setOrder( $sort = null , $order = 'ASC' ) {
+		$symbol = '';
+		if( $sort == $this->field ) {
+			// Eintrag ist aktuelles Sortierelement
+			if( $order == 'DESC' ) {
+				$this->nextorder = 'ASC';
+				$symbol = '▿'; // «
+			} else {
+				$this->nextorder = 'DESC';
+				$symbol = '▵'; //»
+			}
+		} else $this->nextorder = $this->order;
+		
+		//.$_SERVER['PHP_SELF'].
+		
+		$this->output = '<td style="'.$this->style.'"><a href="'.$this->url.'sort='.$this->field.'&order='.$this->nextorder.'">'.$this->title.'</a> '.$symbol.'</td>';
+	}
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+function production_in_list($ProductionID,$productionlist) {
+	if( !isset($productionlist) ) return false;
+	foreach( $productionlist as $production ) {
+		if( isset($production['ProductionID']) && $production['ProductionID'] == $ProductionID ) return true;
+	}
+	return false;
+}
+
+function array_nachvorne( $arr1 , $arr2 ) {
+	$arr3 = $arr1;
+	foreach( $arr2 as $key => $val ) {
+		$arr3[$key] = $val;
+	}
+	return $arr3;
+}
+
+function insertCalendar( $id , $element , $return_time=false ) {
+	global $java_process_dates;
+	
+	if( $return_time ) $return_time_str="1";
+	else $return_time_str="0";
+	
+	// JavaScript-Aufruf zum Ändern der Datumseingabe kurz vor Absenden des Formulars
+	$java_process_dates->addLine('feld = document.frmProduction.elements["'.$element.'"];');
+	$java_process_dates->addLine('feld.value = changeDate(feld.value,'.$return_time_str.');');
+	
+	return new HTML_QuickForm_static_freeze($id , null , '<a href="javascript:openCalendar(\''.$element.'\','.$return_time_str.')"><img class="cal_image" src="images/calendar.png" alt="Kalender"></a>' );
+}
+
+function insertFooter() {
+	echo "\n<div id=\"footer\">Titelbild Interface &copy; 2007 Jess-Arnold & Partner Consulting</div>\n";
+}
+
+$strength_skala = array(
+		-1 => "" ,
+		0 => "&#248;" ,
+		1 => "&#149;" ,
+		2 => "&#149;&#149;" ,
+		3 => "&#149;&#149;&#149;" );
+
+// Zuordnung Mitarbeiterstärken	zu Zeitfaktoren
+$strengthfactor_value = array( 
+			-1 => 0 ,  // nicht gesetzt
+			0 => 0 ,   // Stärke = /
+			1 => 0 , // Stärke *
+			2 => 1 , // Stärke **
+			3 => 2 	); // Stärke ***
+			
+// Zeitfaktoren für Production allgemein
+$factortype = array( 	0 => 'A' ,
+			1 => 'B' ,
+			2 => 'C' );
+
+// Hole Liste der Mitarbeiter
+loadStaff();
+function loadStaff() {
+	global $staff, $allstaff, $staff_sek, $staff_function, $strength_skala, $GROUPID_OFFICE;
+	$staff_function = array(array());
+	$staff = SQLAQuery("SELECT StaffID, Name FROM Staff WHERE Active=1 AND NOT Login='admin' AND StaffID>0 ORDER BY Name ASC");
+	$staff = array_nachvorne( array( "0" => "- Mitarbeiter -" ) , $staff );
+	
+	// Markierungen für die Mitarbeiterstärken abh. von Function
+	$function = SQLQuery("SELECT FunctionID FROM Function");
+	
+	foreach( $staff as $staff_id => $staff_name ) {
+		$strengths = SQLAQuery("SELECT FunctionID, Value FROM Strength WHERE StaffID=$staff_id" );
+		foreach( $function as $function_id ) {
+			if( isset($strengths[$function_id['FunctionID']]) && $strengths[$function_id['FunctionID']]>=0 ) $marker = " ".$strength_skala[$strengths[$function_id['FunctionID']]];
+			else $marker = "";
+			$staff_function[$function_id['FunctionID']][$staff_id] = $staff_name . $marker;			
+		}
+	}
+	
+	// Project Office
+	$staff_sek = SQLAQuery("SELECT StaffID, Name FROM Staff WHERE Active=1 AND StaffID>0 AND GroupID = $GROUPID_OFFICE");
+	$staff_sek = array_nachvorne( array( "0" => "- Project Office -" ) , $staff_sek );
+	$allstaff = SQLAQuery("SELECT StaffID, Name FROM Staff WHERE StaffID>0");
+}
+
+$alllogins = SQLAQuery("SELECT StaffID, Login FROM Staff WHERE StaffID>0 ");
+
+$staffgroup = SQLAQuery("SELECT GroupID, Name FROM StaffGroup WHERE GroupID>0 ORDER BY GroupID ASC");
+
+// Hole Liste der Kunden
+loadCustomers();
+function loadCustomers() {
+	global $customer, $allcustomer;
+	$customer = SQLAQuery("SELECT CustomerID, Name FROM Customer WHERE CustomerID>0 AND Active=1 ORDER BY Name ASC");
+	$customer = array_nachvorne( array( "0" => "- Kunde -" ) , $customer );
+	$allcustomer = SQLAQuery("SELECT CustomerID, Name FROM Customer WHERE CustomerID>0");
+}
+
+// Hole Liste der Kategorien
+$category = SQLAQuery("SELECT CategoryID, Name FROM Category ORDER BY CategoryID ASC");
+
+// Hole Liste der Task-Aufgaben
+$function = SQLAQuery("SELECT FunctionID, Name FROM Function ORDER BY FunctionID ASC");
+
+$function_short = SQLAQuery("SELECT FunctionID, ShortName FROM Function ORDER BY FunctionID ASC");
+
+// Hole Liste der Sprachen
+$languagesel = SQLAQuery("SELECT LanguageID, Language FROM Language ORDER BY Sort ASC, Language ASC");
+$language = array_nachvorne( array( "0" => "- Sprache -" ) , $languagesel );
+
+// Hole Status-Liste
+$status = SQLAQuery("SELECT StatusID, Name FROM Status ORDER BY StatusID ASC");
+$productionstatus = SQLAQuery("SELECT StatusID, Name FROM ProductionStatus ORDER BY StatusID ASC");
+
+// Hole Liste der Produktionen
+$allproduction = SQLAQuery("SELECT ProductionID, ProductionNo FROM Production");
+
+// Hole Liste der Tätigkeiten
+$timetrackingtype = SQLAQuery("SELECT TypeID , Name FROM TimeTrackingType ORDER BY TypeID ASC");
+$timetrackingtype = array_nachvorne( array( "0" => "-löschen-" ) , $timetrackingtype );
+?>

@@ -1,0 +1,74 @@
+.formtable table {	
+	border-collapse:collapse;
+	border: none !important;
+}
+
+td, tr {
+	background:none;
+	border:1px solid silver;
+}
+
+#formular {
+	width:17cm !important;
+}
+
+input[type=text] , input[type=password] , select {
+	background:none !important;
+}
+
+#createbuttons {
+	width:16.8cm !important;
+}
+
+#login {
+	display:none;
+}
+
+#productionlist {
+	display:none;
+}
+
+#ampel {
+}
+
+button {
+	display:none;
+}
+
+input[type=button], input[type=submit], input[type=reset] {
+	display:none;
+}
+
+.input_short {
+}
+
+.input_medium {
+}
+
+.input_long {
+}
+
+.input_dropdown {
+}
+
+.input_select {
+}
+
+.input_duration {
+	width:40px;
+}
+
+.input_date {
+}
+.input_deadline {
+}
+.input_datetime {
+}
+.spaltentitel span {
+}
+.spalten span {
+}
+.taskchecks input {
+}
+.taskchecks {
+}

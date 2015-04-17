@@ -1,0 +1,65 @@
+<?php
+/* $Id: sanitizing.lib.php 7802 2005-11-17 13:12:58Z cybot_tm $ */
+// vim: expandtab sw=4 ts=4 sts=4:
+
+/**
+ * Sanitizes $message, taking into account our special codes
+ * for formatting
+ *
+ * @param   string   the message
+ *
+ * @return  string   the sanitized message
+ *
+ * @access  public
+ */
+function PMA_sanitize($message)
+{
+    $replace_pairs = array(
+        '<'         => '&lt;',
+        '>'         => '&gt;',
+        '[i]'       => '<em>',      // deprecated by em
+        '[/i]'      => '</em>',     // deprecated by em
+        '[em]'      => '<em>',
+        '[/em]'     => '</em>',
+        '[b]'       => '<strong>',  // deprecated by strong
+        '[/b]'      => '</strong>', // deprecated by strong
+        '[strong]'  => '<strong>',
+        '[/strong]' => '</strong>',
+        '[tt]'      => '<code>',    // deprecated by CODE or KBD
+        '[/tt]'     => '</code>',   // deprecated by CODE or KBD
+        '[code]'    => '<code>',
+        '[/code]'   => '</code>',
+        '[kbd]'     => '<kbd>',
+        '[/kbd]'    => '</kbd>',
+        '[br]'      => '<br />',
+        '[/a]'      => '</a>',
+    );
+
+    $message = strtr($message, $replace_pairs);
+
+    $pattern = '/\[a@([^"@]*)@([^]"]*)\]/';
+
+    if (preg_match_all($pattern, $message, $founds, PREG_SET_ORDER)) {
+        $valid_links = array(
+            'http',  // default http:// links (and https://)
+            './Do',  // ./Documentation
+        );
+
+        foreach ($founds as $found) {
+            // only http... and ./Do... allowed
+            if (! in_array(substr($found[1], 0, 4), $valid_links)) {
+                return $message;
+            }
+            // a-z and _ allowed in target
+            if (! empty($found[2]) && preg_match('/[^a-z_]+/i', $found[2])) {
+                return $message;
+            }
+        }
+
+        $message = preg_replace($pattern, '<a href="\1" target="\2">', $message);
+    }
+
+    return $message;
+}
+
+?>

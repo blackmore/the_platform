@@ -1,0 +1,356 @@
+body {
+	padding:5px;
+	font: 12px/1.6em "Lucida Grande",Arial, Geneva, Verdana, Helvetica, sans-serif black;
+	color: black;
+}
+
+a:link 		{ color:darkblue;text-decoration: underline; }
+a:visited 	{ color:darkblue;text-decoration: underline; }
+a:active 	{ color:#cd6416;text-decoration: underline; }
+a:hover 	{ color:#0095cd;text-decoration: underline; }
+
+p { 	margin-top:0;
+}
+
+.debug {
+	color:silver;
+}
+
+.formtable table, .stafftable table {	
+	width:100%;
+	border: 1px solid silver;
+	padding:0;
+	margin:0;
+}
+
+td, tr {
+	background:#f0f0f0;
+	padding: 1px 3px;
+	margin:0px;
+	border:none;
+}
+
+.formtable td + td {
+	width:530px !important;
+}
+
+#formular {
+	width:670px;
+	text-align:left;
+}
+
+input, select, textarea {
+	font: 12px/1.6em "Lucida Grande",Arial, Geneva, Verdana, Helvetica, sans-serif black;
+}
+
+input[type=text] , input[type=password] , select, textarea {
+	border: 1px solid silver;
+	background-color:#fcfcfc;
+	font: 12px/1.6em "Lucida Grande",Arial, Geneva, Verdana, Helvetica, sans-serif black;
+}
+
+#createbuttons {
+	margin-bottom: 8px;
+	background:#f0f0f0;
+	padding:3px;
+	padding-left:30px;
+	border:1px solid silver;
+	height:19px;
+	overflow:hidden;
+	background-repeat:no-repeat;
+	background-position:top left;
+}
+
+#productionlist {
+	border:1px solid silver;
+	background:white;
+	overflow:auto;
+	margin-bottom:1em;
+	width:512px;
+	height:500px;
+}
+
+#productionlist_frame {
+	border:1px solid silver;
+	background:white;
+	width:512px;
+	height:500px;
+	overflow:visible;
+	float:right;
+	text-align:right;
+}
+
+#productionlist_frame iframe {
+	border:none;
+	width:100%;
+	height:500px;
+	background:white;
+	margin:0;
+	padding:0;
+}
+
+#login {
+	float:right;
+}
+
+#startbildschirm {
+	margin:0 auto;
+	width:600px;
+	border:1px solid silver;
+	text-align:center;
+	margin-top: 4em;
+}
+
+#footer {
+	font-size:80%;
+	color:silver;
+}
+
+#ampel {
+	float:right;
+	margin-top:2px;
+	width:49px;
+	height:17px;
+}
+
+button {
+	font: 11px "Lucida Grande",Arial, Geneva, Verdana, Helvetica, sans-serif black;
+}
+
+.elementGrid, .elementGrid td, .elementGrid th, .elementGrid tr {
+	border:none !important;
+	width:auto !important;
+	text-align:left !important;
+	padding:0 !important;
+	border-spacing:0 !important;
+	margin:0 !important;
+}
+.elementGrid td {
+	padding-right:3px !important;
+	white-space:nowrap;
+}
+
+.elementGrid th + td {
+	width:1px !important;
+}
+
+.elementGrid th + td + td + td {
+	width:60% !important;
+}
+
+.elementGridRight, .elementGridRight td, .elementGridRight th, .elementGridRight tr {
+	border:none !important;
+	width:100% !important;
+	text-align:left !important;
+	padding:0 !important;
+	border-spacing:0 !important;
+	height:28px;
+}
+.elementGridRight td {
+	padding-right:3px !important;
+}
+
+.productionlogo {
+	background-color:#999999;
+	width:494px;
+	text-align:center;
+}
+
+.productiontable {
+	width:494px;
+}
+
+.productiontable td, .productiontable tr {
+	background:none;
+	padding:0px;
+	padding-left:4px;
+	margin:0px;
+	border:none;
+	border-bottom:1px solid #e0e0e0;
+}
+
+.productiontable tr:hover {
+	background-color:#EEEEEE;
+}
+
+.productionfilter td {
+	padding-top:5px;
+	padding-bottom:2px;
+	text-align:left;
+	border-top:1px solid silver;
+	font-size:10px;
+}
+
+.productionfilter input {
+	font-size:10px;
+}
+
+.productionfilter form {
+	margin:0;
+	padding:0;
+}
+
+.productioncurrent {
+	background:#999999 !important;
+	color:white;
+}
+
+.productioncurrent a {
+	color:white !important;
+}
+
+.productioncurrent a:hover {
+	text-decoration: underline;
+}
+
+.productiontitle a:link , .productiontitle a:visited {
+	display:block;
+	height:100%;
+	width:100%;
+	margin:0;
+	padding:0;
+	text-decoration:none;
+	color:black;
+}
+
+.productiontitle a:hover {
+	color:#0095cd;
+	text-decoration: underline;
+}
+
+.trackingdate {
+	padding-right:4px !important;
+	text-align:center;
+}
+
+.trackingdate + .trackingdate {
+	border-left:1px solid #e0e0e0 !important;
+}
+
+.productionheader td {
+	border: none;
+	border-bottom:1px solid #444444;
+	border-top:1px solid #444444;
+	font-weight:bold;
+}
+
+.productionheader td a {
+	color:#222222;
+}
+
+.input_char {
+	width:20px;
+}
+
+.input_short {
+	width:150px;
+}
+
+.input_medium {
+	width:180px;
+}
+
+.input_long {
+	width:250px;
+}
+
+.input_extralong {
+	width:480px;
+}
+
+.input_dropdown {
+	width:150px;
+}
+
+.input_statusdrop {
+	width:60px;
+}
+
+.input_select {
+	width:150px;
+	height:100px;
+}
+
+.input_duration {
+	width:48px;
+}
+
+.input_date {
+	width:65px;
+}
+.input_deadline {
+	width:65px;
+	color:darkred !important;
+	font-weight:bold !important;
+}
+.input_datetime {
+	width:90px;
+}
+.spaltentitel span {
+	display:block;
+	float:left;
+	font-size:80%;
+	margin-right:7px;
+	padding:0px;
+}
+.spalten span {
+	display:block;
+	float:left;
+	margin-right:6px;
+	padding:0px;
+}
+.taskchecks input {
+	float:left;
+}
+.taskchecks {
+	display:block;
+	float:left;
+	width:195px;
+}
+
+.uplink {
+	float:right;
+}
+
+.cal_image {
+	border:none;
+	vertical-align:top;
+	margin:0;
+}
+.cal {
+	width:170px;
+}
+.cal td {
+	text-align:center;
+	padding:0px;	
+}
+.cal td a:hover {
+	background-color:#D73131;
+	color:white;
+	font-weight:bold;
+}
+.cal td a:link {
+	display: block;
+	width:100%;
+	height:100%;
+}
+.cal_head {
+	font-weight:bold;
+	background-color:silver;
+	color:white;
+}
+.cal_day {
+
+}
+.cal_today {
+	background-color:silver;
+	font-weight:bold;
+}
+.cal_sel {
+	border:2px solid #D73131 !important;
+	color:red;
+	font-weight:bold;
+}
+.cal_grey {
+	background-color:white;
+}
